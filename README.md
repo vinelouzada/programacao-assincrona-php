@@ -116,6 +116,96 @@ sys     0m0,015s
 
 Logo, podemos concluir que o tempo de resposta total dessas requisições será o **tempo da requisição maior**.
 
+## Programação Assíncrona por baixo dos panos
+
+O cenário acima foi desenvolvido utilizando bibliotecas para facilitar o uso e ocultar toda a complexidade. Dessa forma, abaixo descreve essa implementação de forma nativa com PHP
+
+```
+<?php
+
+//Abrindo os streams
+$listaDeStreams = [
+    stream_socket_client('tcp://localhost:8000'),
+    stream_socket_client('tcp://localhost:8001')
+];
+
+//Enviando uma requisicao http para cada um dos streams
+fwrite($listaDeStreams[0], 'GET /requisicoes/http-server.php HTTP/1.1' . PHP_EOL . PHP_EOL);
+fwrite($listaDeStreams[1], 'GET /requisicoes/http-server.php HTTP/1.1' . PHP_EOL . PHP_EOL);
+
+//Informamos que os recursos devem ser abertos em modo não-bloqueante - assim, o processo que acessa o arquivo não bloqueará a CPU por causar um estado de espera ao tentar acessá-los.
+foreach ($listaDeStreams as $stream){
+    stream_set_blocking($stream, false);
+}
+
+do {
+    $streamsParaLer = $listaDeStreams;
+
+// Observamos modicacoes nestes streams, ou seja, quando este recurso estiver pronto para a leitura
+    $streamsProntos = stream_select($streamsParaLer, $write, $except, 1, 0);
+
+    if ($streamsProntos  === 0) {
+        continue;
+    }
+
+    foreach ($streamsParaLer as $indice => $stream) {
+        $conteudo = stream_get_contents($stream);
+
+        echo $conteudo;
+        if (feof($stream)) {
+            fclose($stream);
+            unset($listaDeStreams[$indice]);
+        }
+    }
+} while (!empty($listaDeStreams));
+
+echo 'ok';
+
+```
+
+### Para executar
+
+1. Entre na pasta `requisicoes` e suba dois servidores: 1 na porta `8000` e outro na `8001`, conforme o comando abaixo:
+
+```
+php -S localhost:8000
+```
+```
+php -S localhost:8001
+```
+2. Abra o terminal use o comando `time` e execute o arquivo `requisicoes-assincronas`, conforme abaixo:
+
+```
+time php implementacao/requisicoes-assincronas.php
+```
+
+3. O resultado semelhante abaixo será exibido:
+
+```
+time php implementacao/requisicoes-assincronas.php 
+HTTP/1.1 200 OK
+Date: Wed, 05 Jul 2023 13:12:06 GMT
+Connection: close
+X-Powered-By: PHP/8.2.3
+Content-type: text/html; charset=UTF-8
+
+Resposta do servidor que levou 1 segundos
+HTTP/1.1 200 OK
+Date: Wed, 05 Jul 2023 13:12:10 GMT
+Connection: close
+X-Powered-By: PHP/8.2.3
+Content-type: text/html; charset=UTF-8
+
+Resposta do servidor que levou 5 segundos
+ok
+real    0m5.080s
+user    0m0.000s
+sys     0m0.015s
+
+```
+
 ## Vantagem de usar programação assíncrona
 
 Olhando esses dois cenários podemos concluir que conseguimos atingir uma melhor performance em cenários de I/O (entrada e/ou saída de dados), pois não bloqueamos o processador enquanto espera a resposta das requisições.
+
+
